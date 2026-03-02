@@ -184,4 +184,4 @@ to replicate real-time sensor ingestion during development.
 *Domain: Automobile Manufacturing — CNC Machines*
 ```
 
----
+
