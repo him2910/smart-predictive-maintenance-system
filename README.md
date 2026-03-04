@@ -1,0 +1,1 @@
+#smart-predictive-maintenance-system
