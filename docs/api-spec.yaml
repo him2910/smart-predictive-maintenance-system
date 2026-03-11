@@ -1,0 +1,67 @@
+openapi: 3.0.0
+info:
+	title: API Title
+	description: API description
+	version: 1.0.0
+	contact:
+		name: Contact Name
+		email: contact@example.com
+
+servers:
+	- url: https://api.example.com/v1
+		description: Production server
+	- url: https://staging-api.example.com/v1
+		description: Staging server
+
+paths:
+	/resources:
+		get:
+			summary: Get all resources
+			tags:
+				- Resources
+			responses:
+				'200':
+					description: Successful response
+					content:
+						application/json:
+							schema:
+								type: array
+								items:
+									$ref: '#/components/schemas/Resource'
+				'400':
+					description: Bad request
+
+		post:
+			summary: Create a new resource
+			tags:
+				- Resources
+			requestBody:
+				required: true
+				content:
+					application/json:
+						schema:
+							$ref: '#/components/schemas/ResourceInput'
+			responses:
+				'201':
+					description: Resource created
+
+components:
+	schemas:
+		Resource:
+			type: object
+			properties:
+				id:
+					type: string
+				name:
+					type: string
+				createdAt:
+					type: string
+					format: date-time
+
+		ResourceInput:
+			type: object
+			required:
+				- name
+			properties:
+				name:
+					type: string
