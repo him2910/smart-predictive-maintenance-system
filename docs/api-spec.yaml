@@ -1,67 +1,697 @@
+# POST   /ingest                      → receive sensor data
+# GET    /predict/{machine_id}        → get machine prediction
+# GET    /machines                    → list all machines
+# GET    /alerts                      → list all alerts
+# POST   /alerts/{id}/acknowledge     → acknowledge an alert
+# GET    /health/{machine_id}/history → get health score history
 openapi: 3.0.0
+
 info:
-	title: API Title
-	description: API description
-	version: 1.0.0
-	contact:
-		name: Contact Name
-		email: contact@example.com
+  title: Smart Predictive Maintenance System API
+  version: 1.0.0
+  description: >
+    REST API for SPMS. Monitors CNC machines in automobile
+    manufacturing and predicts failures before they occur.
+    Domain: Automobile Manufacturing - Nagpur Plant
 
 servers:
-	- url: https://api.example.com/v1
-		description: Production server
-	- url: https://staging-api.example.com/v1
-		description: Staging server
+  - url: http://localhost:8000
+    description: Local development server
+  - url: https://spms-api.railway.app
+    description: Production server
+
+tags:
+  - name: System
+    description: API health and status
+  - name: Ingestion
+    description: Receive sensor data from IoT simulator
+  - name: Predictions
+    description: ML model predictions and health scores
+  - name: Machines
+    description: Machine information and status
+  - name: Alerts
+    description: Alert management and acknowledgement
+  - name: History
+    description: Historical data and trends
 
 paths:
-	/resources:
-		get:
-			summary: Get all resources
-			tags:
-				- Resources
-			responses:
-				'200':
-					description: Successful response
-					content:
-						application/json:
-							schema:
-								type: array
-								items:
-									$ref: '#/components/schemas/Resource'
-				'400':
-					description: Bad request
 
-		post:
-			summary: Create a new resource
-			tags:
-				- Resources
-			requestBody:
-				required: true
-				content:
-					application/json:
-						schema:
-							$ref: '#/components/schemas/ResourceInput'
-			responses:
-				'201':
-					description: Resource created
+  # ─────────────────────────────────────────
+  # SYSTEM
+  # ─────────────────────────────────────────
 
-components:
-	schemas:
-		Resource:
-			type: object
-			properties:
-				id:
-					type: string
-				name:
-					type: string
-				createdAt:
-					type: string
-					format: date-time
+  /health:
+    get:
+      tags: [System]
+      summary: System health check
+      description: >
+        Check if API and all dependent services
+        are running correctly.
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              example:
+                status: healthy
+                version: "1.0.0"
+                timestamp: "2024-01-15T02:47:00Z"
+                services:
+                  database: healthy
+                  redis: healthy
+                  ml_model: loaded
 
-		ResourceInput:
-			type: object
-			required:
-				- name
-			properties:
-				name:
-					type: string
+  # ─────────────────────────────────────────
+  # INGESTION
+  # ─────────────────────────────────────────
+
+  /ingest:
+    post:
+      tags: [Ingestion]
+      summary: Ingest a single sensor reading
+      description: >
+        Receives one sensor reading from IoT simulator.
+        Validates the reading against sensor thresholds.
+        Valid readings saved to TimescaleDB and Redis.
+        Invalid readings saved to dead_letter_readings
+        with rejection reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - machine_id
+                - sensor_id
+                - sensor_type
+                - value
+                - unit
+                - timestamp
+              properties:
+                machine_id:
+                  type: integer
+                  example: 4
+                  description: ID from machines table
+                sensor_id:
+                  type: integer
+                  example: 12
+                  description: ID from sensors table
+                sensor_type:
+                  type: string
+                  example: temperature
+                  enum:
+                    - temperature
+                    - vibration
+                    - current
+                    - spindle_speed
+                value:
+                  type: number
+                  example: 87.4
+                  description: Sensor reading value
+                unit:
+                  type: string
+                  example: celsius
+                  enum:
+                    - celsius
+                    - mm/s
+                    - amperes
+                    - rpm
+                timestamp:
+                  type: string
+                  format: date-time
+                  example: "2024-01-15T02:47:03Z"
+                  description: When sensor recorded this value
+      responses:
+        '202':
+          description: Reading accepted and saved
+          content:
+            application/json:
+              example:
+                message: Reading saved successfully
+                reading_id: 10234
+                machine_id: 4
+                sensor_type: temperature
+                value: 87.4
+        '400':
+          description: Invalid request format or missing fields
+          content:
+            application/json:
+              example:
+                error: Missing required field timestamp
+        '404':
+          description: Machine or sensor not found
+          content:
+            application/json:
+              example:
+                error: Machine 4 not found in system
+        '422':
+          description: Value outside sensor reject limits
+          content:
+            application/json:
+              example:
+                error: Value 250 exceeds upper_reject limit of 200
+                sensor_type: temperature
+                saved_to: dead_letter_readings
+
+  /ingest/batch:
+    post:
+      tags: [Ingestion]
+      summary: Ingest multiple sensor readings at once
+      description: >
+        Accepts an array of sensor readings.
+        Processes each individually.
+        Returns summary of saved vs rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+              example:
+                - machine_id: 4
+                  sensor_type: temperature
+                  value: 87.4
+                  unit: celsius
+                  timestamp: "2024-01-15T02:47:03Z"
+                - machine_id: 4
+                  sensor_type: vibration
+                  value: 4.2
+                  unit: mm/s
+                  timestamp: "2024-01-15T02:47:03Z"
+      responses:
+        '202':
+          description: Batch processed
+          content:
+            application/json:
+              example:
+                total: 2
+                saved: 2
+                rejected: 0
+                rejected_details: []
+
+  # ─────────────────────────────────────────
+  # MACHINES
+  # ─────────────────────────────────────────
+
+  /machines:
+    get:
+      tags: [Machines]
+      summary: List all machines
+      description: >
+        Returns all machines with their current
+        status and latest health score.
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, inactive, under_maintenance]
+          description: Filter by machine status
+      responses:
+        '200':
+          description: List of machines
+          content:
+            application/json:
+              example:
+                total: 4
+                machines:
+                  - id: 1
+                    name: Horizontal Machining Center 1
+                    machine_type: CNC
+                    location: Shop Floor A - Section 1
+                    status: active
+                    latest_health_score: 92
+                    last_prediction_at: "2024-01-15T02:50:00Z"
+                  - id: 4
+                    name: Vertical Machining Center 2
+                    machine_type: CNC
+                    location: Shop Floor B - Section 2
+                    status: active
+                    latest_health_score: 34
+                    last_prediction_at: "2024-01-15T02:50:00Z"
+
+  /machines/{machine_id}:
+    get:
+      tags: [Machines]
+      summary: Get one machine details
+      parameters:
+        - name: machine_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 4
+      responses:
+        '200':
+          description: Machine details
+          content:
+            application/json:
+              example:
+                id: 4
+                name: Vertical Machining Center 2
+                machine_type: CNC
+                location: Shop Floor B - Section 2
+                plant_id: 1
+                manufacturer: Mazak
+                status: active
+                created_at: "2024-01-01T00:00:00Z"
+        '404':
+          description: Machine not found
+          content:
+            application/json:
+              example:
+                error: Machine 4 not found
+
+  # ─────────────────────────────────────────
+  # PREDICTIONS
+  # ─────────────────────────────────────────
+
+  /predict/{machine_id}:
+    get:
+      tags: [Predictions]
+      summary: Get latest prediction for a machine
+      description: >
+        Returns the most recent ML model prediction
+        for the specified machine. Includes health score,
+        failure probability, and top contributing features.
+        Result is cached in Redis for 60 seconds.
+      parameters:
+        - name: machine_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 4
+      responses:
+        '200':
+          description: Latest prediction
+          content:
+            application/json:
+              example:
+                machine_id: 4
+                machine_name: Vertical Machining Center 2
+                predicted_at: "2024-01-15T02:50:00Z"
+                model_version: xgboost-v1.0
+                health_score: 34
+                failure_probability: 0.78
+                predicted_failure_in: 31
+                failure_type: bearing_wear
+                confidence_score: 0.87
+                top_features:
+                  - feature: temp_rate_of_change
+                    value: 2.1
+                  - feature: vib_fft_peak_freq
+                    value: 127.0
+                  - feature: current_std
+                    value: 1.8
+                cached: true
+        '404':
+          description: Machine not found
+          content:
+            application/json:
+              example:
+                error: Machine 4 not found
+        '503':
+          description: ML model not loaded
+          content:
+            application/json:
+              example:
+                error: ML model not available
+                retry_after: 30
+
+  /predict/{machine_id}/features:
+    get:
+      tags: [Predictions]
+      summary: Get latest feature vector for a machine
+      description: >
+        Returns the most recent computed feature vector.
+        Useful for debugging model predictions.
+      parameters:
+        - name: machine_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 4
+      responses:
+        '200':
+          description: Latest feature vector
+          content:
+            application/json:
+              example:
+                machine_id: 4
+                window_start: "2024-01-15T02:40:00Z"
+                window_end: "2024-01-15T02:50:00Z"
+                temp_mean: 84.7
+                temp_max: 88.1
+                temp_std: 1.2
+                temp_rate_of_change: 2.1
+                vib_mean: 3.2
+                vib_max: 5.1
+                vib_std: 0.8
+                vib_fft_peak_freq: 127.0
+                vib_fft_peak_amp: 0.45
+                current_mean: 38.2
+                current_max: 41.0
+                current_std: 1.8
+                spindle_mean: 3200.0
+                spindle_std: 12.1
+        '404':
+          description: Machine not found
+
+  # ─────────────────────────────────────────
+  # ALERTS
+  # ─────────────────────────────────────────
+
+  /alerts:
+    get:
+      tags: [Alerts]
+      summary: List alerts
+      description: >
+        Returns alerts with optional filters.
+        Defaults to showing only active alerts.
+      parameters:
+        - name: machine_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Filter by machine
+        - name: severity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [INFO, WARNING, CRITICAL]
+          description: Filter by severity level
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, acknowledged, resolved,
+                   false_positive]
+          description: Filter by status
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+          description: Number of results to return
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 0
+          description: Pagination offset
+      responses:
+        '200':
+          description: List of alerts
+          content:
+            application/json:
+              example:
+                total: 3
+                alerts:
+                  - id: 5
+                    machine_id: 4
+                    machine_name: Vertical Machining Center 2
+                    alert_type: ml_prediction
+                    severity: WARNING
+                    title: Bearing wear detected on CNC-004
+                    message: >
+                      Health score dropped to 34.
+                      Temperature rising at 2.1 degrees/min.
+                      Vibration at bearing frequency 127Hz.
+                    status: active
+                    raised_at: "2024-01-15T02:50:00Z"
+                    acknowledged_by: null
+                    acknowledged_at: null
+
+  /alerts/{id}:
+    get:
+      tags: [Alerts]
+      summary: Get single alert details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 5
+      responses:
+        '200':
+          description: Alert details
+          content:
+            application/json:
+              example:
+                id: 5
+                machine_id: 4
+                severity: WARNING
+                title: Bearing wear detected
+                status: active
+                raised_at: "2024-01-15T02:50:00Z"
+        '404':
+          description: Alert not found
+          content:
+            application/json:
+              example:
+                error: Alert 5 not found
+
+  /alerts/{id}/acknowledge:
+    post:
+      tags: [Alerts]
+      summary: Acknowledge an alert
+      description: >
+        Marks alert as acknowledged by maintenance engineer.
+        Changes status from active to acknowledged.
+        Records who acknowledged and when.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - acknowledged_by
+              properties:
+                acknowledged_by:
+                  type: string
+                  example: Ramesh Kumar
+                  description: Name of engineer acknowledging
+      responses:
+        '200':
+          description: Alert acknowledged successfully
+          content:
+            application/json:
+              example:
+                message: Alert acknowledged
+                alert_id: 5
+                acknowledged_by: Ramesh Kumar
+                acknowledged_at: "2024-01-15T03:15:00Z"
+                status: acknowledged
+        '404':
+          description: Alert not found
+          content:
+            application/json:
+              example:
+                error: Alert 5 not found
+        '409':
+          description: Alert already acknowledged
+          content:
+            application/json:
+              example:
+                error: Alert 5 already acknowledged
+                acknowledged_by: Ramesh Kumar
+                acknowledged_at: "2024-01-15T03:15:00Z"
+
+  /alerts/{id}/resolve:
+    post:
+      tags: [Alerts]
+      summary: Resolve an alert
+      description: >
+        Marks alert as resolved after machine is fixed.
+        Changes status to resolved or false_positive.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 5
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - resolved_by
+                - resolution_notes
+              properties:
+                resolved_by:
+                  type: string
+                  example: Ramesh Kumar
+                resolution_notes:
+                  type: string
+                  example: Replaced front spindle bearing. Machine running normally.
+                is_false_positive:
+                  type: boolean
+                  example: false
+                  description: >
+                    True if machine was actually fine.
+                    Used for model improvement tracking.
+      responses:
+        '200':
+          description: Alert resolved
+          content:
+            application/json:
+              example:
+                message: Alert resolved
+                alert_id: 5
+                status: resolved
+                resolved_by: Ramesh Kumar
+                resolved_at: "2024-01-15T08:30:00Z"
+        '404':
+          description: Alert not found
+
+  # ─────────────────────────────────────────
+  # HISTORY
+  # ─────────────────────────────────────────
+
+  /history/{machine_id}:
+    get:
+      tags: [History]
+      summary: Get health score history for a machine
+      description: >
+        Returns time-series of health scores.
+        Used by Grafana and Streamlit for trend charts.
+        Queries TimescaleDB continuous aggregates for speed.
+      parameters:
+        - name: machine_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 4
+        - name: start_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          example: "2024-01-14T00:00:00Z"
+          description: Start of time range
+        - name: end_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+          example: "2024-01-15T00:00:00Z"
+          description: End of time range
+        - name: resolution
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [raw, hourly, daily]
+            default: hourly
+          description: >
+            Data resolution.
+            raw = every prediction,
+            hourly = hourly averages,
+            daily = daily averages
+      responses:
+        '200':
+          description: Health score history
+          content:
+            application/json:
+              example:
+                machine_id: 4
+                machine_name: Vertical Machining Center 2
+                resolution: hourly
+                total_points: 24
+                data:
+                  - timestamp: "2024-01-14T02:00:00Z"
+                    health_score: 78
+                    failure_probability: 0.22
+                  - timestamp: "2024-01-14T03:00:00Z"
+                    health_score: 71
+                    failure_probability: 0.31
+                  - timestamp: "2024-01-14T04:00:00Z"
+                    health_score: 58
+                    failure_probability: 0.48
+                  - timestamp: "2024-01-15T02:00:00Z"
+                    health_score: 34
+                    failure_probability: 0.78
+        '404':
+          description: Machine not found
+
+  /history/{machine_id}/sensors:
+    get:
+      tags: [History]
+      summary: Get raw sensor reading history
+      description: >
+        Returns historical sensor readings for charts.
+        Supports filtering by sensor type and time range.
+      parameters:
+        - name: machine_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 4
+        - name: sensor_type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [temperature, vibration,
+                   current, spindle_speed]
+          description: Filter by sensor type
+        - name: start_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: end_time
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Sensor reading history
+          content:
+            application/json:
+              example:
+                machine_id: 4
+                sensor_type: temperature
+                total_points: 600
+                data:
+                  - timestamp: "2024-01-15T02:40:01Z"
+                    value: 82.1
+                    unit: celsius
+                  - timestamp: "2024-01-15T02:40:02Z"
+                    value: 82.3
+                    unit: celsius
+                  - timestamp: "2024-01-15T02:40:03Z"
+                    value: 82.8
+                    unit: celsius
+        '404':
+          description: Machine not found
