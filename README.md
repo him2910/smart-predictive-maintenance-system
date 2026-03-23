@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 #smart-predictive-maintenance-system
 =======
 #smart-predictive-maintenace-system
