@@ -48,7 +48,7 @@ CREATE INDEX "sensor_readings_timestamp_index" ON
     "sensor_readings"("timestamp");
 CREATE TABLE "feature_vector"(
     "id" bigserial NOT NULL,
-    "machine_id" VARCHAR(255) NOT NULL,
+    "machine_id" BIGINT NOT NULL,
     "window_start" TIMESTAMP(0) WITH
         TIME zone NOT NULL,
         "temp_mean" DECIMAL(8, 2) NULL,
@@ -73,8 +73,9 @@ CREATE TABLE "feature_vector"(
         TIME zone NOT NULL DEFAULT NOW(), "label" INTEGER NULL);
 ALTER TABLE
     "feature_vector" ADD PRIMARY KEY("id");
-ALTER TABLE
-    "feature_vector" ADD PRIMARY KEY("machine_id");
+ALTER TABLE 
+    "feature_vector" ADD UNIQUE("machine_id", "window_start");
+
 CREATE TABLE "predictions"(
     "id" bigserial NOT NULL,
     "machine_id" BIGINT NOT NULL,
@@ -172,7 +173,7 @@ ALTER TABLE
     "dead_letter_readings" ADD PRIMARY KEY("id");
 CREATE INDEX "dead_letter_readings_investigated_index" ON
     "dead_letter_readings"("investigated");
-CREATE TABLE "New table"();
+
 ALTER TABLE
     "maintenance_logs" ADD CONSTRAINT "maintenance_logs_alert_id_foreign" FOREIGN KEY("alert_id") REFERENCES "alerts"("id");
 ALTER TABLE
