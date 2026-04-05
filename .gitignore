@@ -40,3 +40,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Data files
+data/
+*.csv
+*.parquet
