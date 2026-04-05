@@ -1,0 +1,81 @@
+
+
+services:
+
+  # ─────────────────────────────────────
+  # TimescaleDB (PostgreSQL + time-series)
+  # ─────────────────────────────────────
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: spms_timescaledb
+    restart: always
+    environment:
+      POSTGRES_DB: spms_db
+      POSTGRES_USER: spms_user
+      POSTGRES_PASSWORD: spms_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spms_user -d spms_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────
+  # Redis (cache for latest readings)
+  # ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: spms_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────
+  # Mosquitto (MQTT Broker)
+  # ─────────────────────────────────────
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: spms_mosquitto
+    restart: always
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_logs:/mosquitto/log
+
+  # ─────────────────────────────────────
+  # MLflow (ML experiment tracking)
+  # ─────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.8.1
+    container_name: spms_mlflow
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --default-artifact-root /mlflow/artifacts
+      --backend-store-uri sqlite:///mlflow/mlflow.db
+
+volumes:
+  timescale_data:
+  redis_data:
+  mosquitto_data:
+  mosquitto_logs:
+  mlflow_data:
